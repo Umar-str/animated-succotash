@@ -2,69 +2,58 @@ import streamlit as st
 import chromadb
 from google import genai
 from google.genai import types
+from pypdf import PdfReader # New library for PDF parsing
 
-# --- 1. CONFIG & UI SETUP ---
-st.set_page_config(page_title="Perk HRMS Assistant", page_icon="🏢", layout="centered")
-
-st.markdown("""
-    <style>
-    .stApp { background-color: #f9f9f9; }
-    .stChatMessage { border-radius: 15px; border: 1px solid #eee; margin-bottom: 10px; }
-    </style>
-""", unsafe_allow_html=True)
+# --- 1. CONFIG & UI ---
+st.set_page_config(page_title="Football Transfer RAG", page_icon="⚽")
 
 # --- 2. INITIALIZE CLIENTS ---
-# Uses st.secrets for safety in the cloud
 API_KEY = st.secrets["GEMINI_API_KEY"]
 client = genai.Client(api_key=API_KEY)
 
-# --- 3. CACHED VECTOR DB LOGIC ---
+# --- 3. PARSING LOGIC ---
+def parse_document(uploaded_file):
+    """Extracts text from PDF or TXT files."""
+    text = ""
+    if uploaded_file.type == "application/pdf":
+        reader = PdfReader(uploaded_file)
+        for page in reader.pages:
+            text += page.extract_text()
+    elif uploaded_file.type == "text/plain":
+        text = str(uploaded_file.read(), "utf-8")
+    return text
+
 @st.cache_resource
 def get_vector_db():
-    """Builds the DB once and caches it for the whole session."""
     chroma_client = chromadb.EphemeralClient()
-    collection = chroma_client.get_or_create_collection(name="perk_temp_db")
-    
-    # Your Colab documents
-    documents = [
-        "The standard Work-from-Home (WFH) policy allows employees to work remotely up to two days per week with prior manager approval.",
-        "Travel expenses exceeding $50 require a digital receipt for reimbursement, which must be submitted via the portal within 15 days.",
-        "The annual leave cycle runs from January to December. Employees can carry forward a maximum of 5 unused days to the next calendar year.",
-        "To reset your internal system password, visit the 'Security Settings' tab and select 'Update Credentials'. Passwords must be 12 characters long.",
-        "Our internal servers undergo scheduled maintenance every first Sunday of the month between 02:00 AM and 04:00 AM EST.",
-        "Hardware upgrades for laptops are available every 36 months of service. Requests should be logged under the 'IT Procurement' ticket category.",
-        "The company headquarters is located in the downtown Innovation District, featuring an open-plan design and three dedicated collaborative zones.",
-        "Our sustainability initiative aims to reduce office paper waste by 40% by the end of 2026 through the 'Digital-First' documentation mandate.",
-        "The 'Peer Recognition' program allows team members to nominate colleagues for monthly awards based on core values like Integrity and Innovation.",
-        "All employees must complete the Mandatory Cybersecurity Training module annually to maintain their system access privileges.",
-        "Confidential documents should never be shared via external messaging apps; use the secure internal 'Vault' for all sensitive file transfers."
-    ]
+    return chroma_client.get_or_create_collection(name="football_transfers")
 
-    # Indexing documents (happens only on first run)
-    for i, text in enumerate(documents):
-        response = client.models.embed_content(
-            model="gemini-embedding-001",
-            contents=text,
-            config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT")
-        )
-        vector = response.embeddings[0].values
-        collection.add(ids=[str(i)], embeddings=[vector], documents=[text])
-    
-    return collection
-
-# Initialize the collection
 collection = get_vector_db()
 
-# --- 4. RAG HELPER FUNCTIONS ---
-def get_relevant_context(query_text, num_results=2):
-    query_resp = client.models.embed_content(
-        model="gemini-embedding-001",
-        contents=query_text,
-        config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY")
-    )
-    query_vector = query_resp.embeddings[0].values
-    results = collection.query(query_embeddings=[query_vector], n_results=num_results)
-    return " ".join(results['documents'][0])
+# --- 4. SIDEBAR UPLOADER ---
+with st.sidebar:
+    st.title("Upload Knowledge")
+    uploaded_file = st.file_uploader("Upload Transfer News (PDF/TXT)", type=["pdf", "txt"])
+    
+    if uploaded_file and st.button("Process Document"):
+        with st.spinner("Analyzing and Indexing..."):
+            raw_text = parse_document(uploaded_file)
+            # Simple chunking: split by double newlines or large blocks
+            chunks = [c.strip() for c in raw_text.split('\n\n') if len(c.strip()) > 10]
+            
+            for i, chunk in enumerate(chunks):
+                # Using Gemini to embed each chunk
+                resp = client.models.embed_content(
+                    model="gemini-embedding-001",
+                    contents=chunk,
+                    config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT")
+                )
+                collection.add(
+                    ids=[f"{uploaded_file.name}_{i}"],
+                    embeddings=[resp.embeddings[0].values],
+                    documents=[chunk]
+                )
+        st.success(f"Indexed {len(chunks)} sections from {uploaded_file.name}!")
 
 # --- 5. CHAT INTERFACE ---
 st.title("Perk HRMS Expert")
