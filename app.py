@@ -91,6 +91,8 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+system_msg = input("Write your system message.")
+
 # User Input
 if prompt := st.chat_input("Ask about 2026 transfers..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -104,7 +106,7 @@ if prompt := st.chat_input("Ask about 2026 transfers..."):
             context = get_relevant_context(prompt, collection)
             
             # 2. Generate with Gemini 3
-            system_msg = input("Write your system message.")
+            #system_msg = input("Write your system message.")
             user_prompt = f"CONTEXT: {context}\n\nQUESTION: {prompt}"
             
             response = client.models.generate_content(
