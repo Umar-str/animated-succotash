@@ -2,35 +2,61 @@ import streamlit as st
 import chromadb
 from google import genai
 from google.genai import types
-from pypdf import PdfReader # New library for PDF parsing
+from pypdf import PdfReader
 
 # --- 1. CONFIG & UI ---
 st.set_page_config(page_title="Football Transfer RAG", page_icon="⚽")
 
 # --- 2. INITIALIZE CLIENTS ---
+# Ensure GEMINI_API_KEY is set in Streamlit Cloud Secrets
 API_KEY = st.secrets["GEMINI_API_KEY"]
 client = genai.Client(api_key=API_KEY)
 
-# --- 3. PARSING LOGIC ---
+# --- 3. HELPER FUNCTIONS ---
+
 def parse_document(uploaded_file):
     """Extracts text from PDF or TXT files."""
     text = ""
     if uploaded_file.type == "application/pdf":
         reader = PdfReader(uploaded_file)
         for page in reader.pages:
-            text += page.extract_text()
+            text += page.extract_text() or ""
     elif uploaded_file.type == "text/plain":
         text = str(uploaded_file.read(), "utf-8")
     return text
 
 @st.cache_resource
 def get_vector_db():
+    """Initializes the ChromaDB collection once."""
     chroma_client = chromadb.EphemeralClient()
     return chroma_client.get_or_create_collection(name="football_transfers")
 
+def get_relevant_context(query_text, _collection, num_results=2):
+    """Retrieves relevant chunks from the vector database."""
+    # 1. Embed the user query
+    query_resp = client.models.embed_content(
+        model="gemini-embedding-001",
+        contents=query_text,
+        config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY")
+    )
+    query_vector = query_resp.embeddings[0].values
+
+    # 2. Query the collection
+    results = _collection.query(
+        query_embeddings=[query_vector],
+        n_results=num_results
+    )
+    
+    # Handle empty results
+    if not results or not results['documents'][0]:
+        return "No relevant context found."
+        
+    return " ".join(results['documents'][0])
+
+# --- 4. DATA INITIALIZATION ---
 collection = get_vector_db()
 
-# --- 4. SIDEBAR UPLOADER ---
+# --- 5. SIDEBAR UPLOADER ---
 with st.sidebar:
     st.title("Upload Knowledge")
     uploaded_file = st.file_uploader("Upload Transfer News (PDF/TXT)", type=["pdf", "txt"])
@@ -38,11 +64,9 @@ with st.sidebar:
     if uploaded_file and st.button("Process Document"):
         with st.spinner("Analyzing and Indexing..."):
             raw_text = parse_document(uploaded_file)
-            # Simple chunking: split by double newlines or large blocks
             chunks = [c.strip() for c in raw_text.split('\n\n') if len(c.strip()) > 10]
             
             for i, chunk in enumerate(chunks):
-                # Using Gemini to embed each chunk
                 resp = client.models.embed_content(
                     model="gemini-embedding-001",
                     contents=chunk,
@@ -53,11 +77,11 @@ with st.sidebar:
                     embeddings=[resp.embeddings[0].values],
                     documents=[chunk]
                 )
-        st.success(f"Indexed {len(chunks)} sections from {uploaded_file.name}!")
+        st.success(f"Indexed {len(chunks)} sections!")
 
-# --- 5. CHAT INTERFACE ---
-st.title("Perk HRMS Expert")
-st.caption("Gemini 3 Powered RAG System")
+# --- 6. CHAT INTERFACE ---
+st.title("Football Transfer Expert")
+st.caption("Gemini 3 Powered RAG System (Sept 2025 - Jan 2026)")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -68,19 +92,19 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # User Input
-if prompt := st.chat_input("Ask about company policy..."):
+if prompt := st.chat_input("Ask about 2026 transfers..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     # Execute RAG Logic
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            # 1. Retrieve
-            context = get_relevant_context(prompt)
+        with st.spinner("Searching documents & thinking..."):
+            # 1. Retrieve (Passing the collection explicitly)
+            context = get_relevant_context(prompt, collection)
             
             # 2. Generate with Gemini 3
-            system_msg = "You are a Perk HRMS expert. Answer ONLY using the provided context."
+            system_msg = "You are a Football Transfer expert. Answer ONLY using the provided context."
             user_prompt = f"CONTEXT: {context}\n\nQUESTION: {prompt}"
             
             response = client.models.generate_content(
@@ -95,7 +119,7 @@ if prompt := st.chat_input("Ask about company policy..."):
             full_response = response.text
             st.markdown(full_response)
             
-            # Optional: Show reasoning in an expander
+            # Show reasoning
             with st.expander("View AI Reasoning"):
                 for part in response.candidates[0].content.parts:
                     if part.thought:
