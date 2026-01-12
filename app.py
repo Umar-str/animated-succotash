@@ -104,7 +104,7 @@ if prompt := st.chat_input("Ask about 2026 transfers..."):
             context = get_relevant_context(prompt, collection)
             
             # 2. Generate with Gemini 3
-            system_msg = "You are a Football Transfer expert. Answer ONLY using the provided context."
+            system_msg = input("Write your system message.")
             user_prompt = f"CONTEXT: {context}\n\nQUESTION: {prompt}"
             
             response = client.models.generate_content(
@@ -119,10 +119,10 @@ if prompt := st.chat_input("Ask about 2026 transfers..."):
             full_response = response.text
             st.markdown(full_response)
             
-            # Show reasoning
-            with st.expander("View AI Reasoning"):
+            """Show reasoning
+           with st.expander("View AI Reasoning"):
                 for part in response.candidates[0].content.parts:
                     if part.thought:
-                        st.caption(part.text)
+                        st.caption(part.text)"""
     
     st.session_state.messages.append({"role": "assistant", "content": full_response})
