@@ -120,10 +120,5 @@ if prompt := st.chat_input("Ask about 2026 transfers..."):
             full_response = response.text
             st.markdown(full_response)
             
-            """Show reasoning
-           with st.expander("View AI Reasoning"):
-                for part in response.candidates[0].content.parts:
-                    if part.thought:
-                        st.caption(part.text)"""
     
     st.session_state.messages.append({"role": "assistant", "content": full_response})
